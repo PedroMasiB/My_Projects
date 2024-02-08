@@ -1,0 +1,18 @@
+/*
+ * adsr.c
+ *
+ *  Created on: Oct 6, 2022
+ *      Author: kerhoas
+ */
+#include "adsr.h"
+#include <stdint.h>
+#pragma GCC optimize ("O0")
+
+float tab_adsr[2000];
+
+int adsr(struct adsr_TypeStruct* adsr_s)
+{
+
+return 0;
+
+}

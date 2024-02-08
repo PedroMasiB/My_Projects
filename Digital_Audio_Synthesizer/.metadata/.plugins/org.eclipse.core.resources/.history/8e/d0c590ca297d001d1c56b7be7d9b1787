@@ -1,0 +1,443 @@
+#include <filter_coeff.h>
+#include "arm_math.h"
+#include "FIR_filter.h"
+#include "IIR_filter.h"
+#include "stm32f7_wm8994_init.h"
+#include "stm32f7_display.h"
+#include "main.h"
+#include "notes.h"
+#include "arm_math.h"
+#include "tickTimer.h"
+#include "signalTables.h"
+#include "adsr.h"
+
+#pragma GCC optimize ("O0")
+#define SOURCE_FILE_NAME "Titre Graphe"
+
+//https://www.musicdsp.org/en/latest/Filters/
+static void SystemClock_Config(void);
+static void MPU_Config(void);
+static void CPU_CACHE_Enable(void);
+static void usbUserProcess(USBH_HandleTypeDef *pHost, uint8_t vId);
+static void midiApplication();
+
+USBH_HandleTypeDef hUSBHost;
+static uint8_t midiReceiveBuffer[MIDI_BUF_SIZE];
+static __IO uint32_t USBReceiveAvailable = 0;
+static AppState appState = APP_IDLE;
+
+extern int16_t rx_sample_L;
+extern int16_t rx_sample_R;
+extern int16_t tx_sample_L;
+extern int16_t tx_sample_R;
+
+float32_t signal_freq=440.0;
+#define SAMPLING_FREQ 44100.0
+
+float32_t x[N_FILTER];
+arm_fir_instance_f32 ARM_FIR_F32;
+float32_t state_f32[N_FILTER];
+float32_t h_custom[N_FILTER];
+arm_iir_instance_f32  ARM_IIR_F32;
+float32_t h_average[5];
+
+uint8_t noteOn=0;
+uint8_t noteOff=0;
+float32_t theta = 0.0;
+int triggOn = 0;
+int triggOff = 0;
+int count_adsr = 0;
+float gain_adsr = 0.0;
+int nb_key_pressed=0;
+
+float tab_coef[9];
+float tab_history[4];
+
+struct adsr_TypeStruct adsr0={0,0,0,0.0,0.0,0.0,NOTE_OFF,0,0.0};
+
+#define N 5
+
+void BSP_AUDIO_SAI_Interrupt_CallBack()
+{
+  static int16_t i=0;
+  float32_t yn = 0.0;
+ // BSP_LED_On(LED1);
+  //#############################################
+  // 			BYPASS
+  //#############################################
+ /* tx_sample_L = rx_sample_L;
+  tx_sample_R = rx_sample_R;*/
+
+  //#############################################
+  // 			EFFET REVERB
+  //#############################################
+  // REMARQUE : tester avec impulse cf impulse_DAC12
+
+  //#############################################
+  // 			FILTRE MOYENNEUR
+  //#############################################
+ /* x[0] = (float32_t)(rx_sample_L);
+  for (i=0 ; i<5 ; i++) yn += h_average[i]*x[i];
+  for (i=(5-1) ; i>0 ; i--) x[i] = x[i-1];
+  tx_sample_L = (int16_t)(yn);
+  tx_sample_R = tx_sample_L;*/
+  //#############################################
+  // 			ADSR
+  //#############################################
+  //adsr(&gain_adsr, table_freq[noteOn], &signal_freq);
+
+ // adsr0.triggOn  = triggOn;
+ // adsr0.triggOff	= triggOff;
+
+  adsr0.note_freq = table_freq[noteOn];
+  adsr(&adsr0);
+
+  //#############################################
+  // 			GENERATION SIGNAL
+  //#############################################
+  //adsr0.theta = adsr0.theta +  2*PI*(adsr0.note_freq)/SAMPLING_FREQ;
+ /* adsr0.theta = adsr0.theta +  2*PI*(adsr0.sig_freq)/SAMPLING_FREQ;
+  if (adsr0.theta > 2*PI) adsr0.theta -= 2*PI;
+  i=(int)((1000-1)*(adsr0.theta/(2*PI)));
+
+//  adsr0.gain = 1.0;
+  x[0]=(adsr0.gain)*(float)(sawtooth_int[i]);*/
+ // x[0]=(float)(square_int[i]>>2);
+  //x[0]=(float)rx_sample_L;
+
+  //#############################################
+  // 			IIR FILTER
+  //#############################################
+  x[0]=(float)rx_sample_R;
+  arm_iir_f32(&ARM_IIR_F32, x, &yn);
+  tx_sample_L=(int16_t)yn;
+//tx_sample_L=(int16_t)x[0];
+  tx_sample_R = tx_sample_L;
+ /* tx_sample_L = (int16_t)(x[0]);
+  tx_sample_R = tx_sample_L;
+*/
+  //#############################################
+  // 			FILTRE FIR NON OPTIMISE
+  //#############################################
+ /* x[0]=(float)rx_sample_L;
+  for (i=0 ; i<N_FILTER ; i++) yn += FILTER_COEFFS[i]*x[i];
+  for (i=(N_FILTER-1) ; i>0 ; i--) x[i] = x[i-1];
+  tx_sample_L = yn;
+  tx_sample_R = tx_sample_L;*/
+  //#############################################
+  // 			FILTRE FIR CMSIS float32_t yn = 0.0;
+  //#############################################
+  //x[0]=(float)rx_sample_L;
+ /* x[0]=(int16_t)(gain_adsr*(float)square_int[i]);
+  arm_fir_f32(&ARM_FIR_F32,x,&yn,1);
+  //FIR_filt_f32_circular(&ARM_FIR_F32,x,&yn);
+  tx_sample_L = yn;
+  tx_sample_R = tx_sample_L;*/
+  //#############################################
+ // BSP_LED_Off(LED1);
+  //plotSamplesIntr(tx_sample_L, 128); // !! prend du temps
+
+  return;
+}
+
+
+//============================================================================
+//		INTERRUPTION CALLBACK ON TIMER PERIOD
+//============================================================================
+
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+static int count = 0;
+static float cutoff_freq;
+float32_t yn = 0.0;
+
+	if (htim->Instance==TIM5)
+	{
+		 // BSP_LED_On(LED1);
+		  if (count == 0)
+		  {
+			  if (  table_freq[noteOn] > 0.0)
+			  {
+				  cutoff_freq = 4.0*table_freq[noteOn];
+			  }
+			  else
+			  {
+				  cutoff_freq = 440.0;
+			  }
+				/*======================================================
+				 *                   FIR FILTER
+				 ======================================================*/
+			  	 /* arm_fir_init_f32(&ARM_FIR_F32,N_FILTER,FILTER_COEFFS,state_f32,1);
+				  FIR_calc_coeff_f32(&ARM_FIR_F32,N_FILTER,cutoff_freq, 0.0, SAMPLING_FREQ, 0);
+				*/
+				/*======================================================
+				 *                   IIR FILTER
+				 ======================================================*/
+				  arm_iir_init_f32(&ARM_IIR_F32,2,tab_coef, tab_history,1);
+				  IIR_calc_coeff_f32(&ARM_IIR_F32, 2,cutoff_freq, 0, SAMPLING_FREQ, 0 );
+
+		  }
+		  count = ( count + 1 ) %10;
+		//  BSP_LED_Off(LED1);
+	}
+}
+
+int main(void)
+{
+//	CPU_CACHE_Enable();
+//	HAL_Init();
+//	SystemClock_Config();
+	  HAL_Init();
+	  /* Configure the MPU attributes as Write Through */
+	  MPU_Config();         // configure the MPU attributes as write-through
+	  CPU_CACHE_Enable();   // enable the CPU cache
+	  SystemClock_Config(); // configure the system clock to 200 Mhz
+	  BSP_LED_Init(LED1);   // initialise LED on GPIO pin P   (also accessible on arduino header)
+	  BSP_GPIO_Init();      // initialise diagnostic GPIO pin P   (accessible on arduino header)
+	  BSP_PB_Init(BUTTON_KEY, BUTTON_MODE_GPIO); // configure the  blue user pushbutton in GPIO mode
+	  BSP_SDRAM_Init();
+	//DAC12_Config();
+	  //init_LCD(fs, name, io_method, graph);
+
+	//#############################################
+	// 			FILTRE  INIT
+	//#############################################
+	for (int i=0 ; i<5 ; i++) h_average[i] = 1.0/5;
+	//arm_fir_init_f32(&ARM_FIR_F32,N_FILTER,FILTER_COEFFS,state_f32,1);
+	//FIR_init_f32(&ARM_FIR_F32, N_FILTER, FILTER_COEFFS, state_f32);
+	//#############################################
+
+
+
+
+
+
+	USBH_Init(&hUSBHost, usbUserProcess, 0);
+	USBH_RegisterClass(&hUSBHost, USBH_MIDI_CLASS);
+	USBH_Start(&hUSBHost);
+
+
+	  tickTimerInit(1);
+
+	/*  arm_iir_init_f32(&ARM_IIR_F32,1,tab_coef, tab_history,1);
+	IIR_calc_coeff_f32(&ARM_IIR_F32, 1,440.0, 0, SAMPLING_FREQ, 0 );
+*/
+  stm32f7_wm8994_init(AUDIO_FREQUENCY_44K,
+                      IO_METHOD_INTR,
+                      INPUT_DEVICE_INPUT_LINE_1,
+                      OUTPUT_DEVICE_HEADPHONE,
+                      WM8994_HP_OUT_ANALOG_GAIN_0DB,
+                      WM8994_LINE_IN_GAIN_0DB,
+                      WM8994_DMIC_GAIN_9DB,
+                      SOURCE_FILE_NAME,
+                      NOGRAPH);
+
+  while(1)
+  {
+			midiApplication();
+			USBH_Process(&hUSBHost);
+  }
+}
+//=================================================================
+void usbUserProcess(USBH_HandleTypeDef *usbHost, uint8_t eventID) {
+	UNUSED(usbHost);
+	switch (eventID) {
+	case HOST_USER_SELECT_CONFIGURATION:
+		break;
+	case HOST_USER_DISCONNECTION:
+		appState = APP_DISCONNECT;
+		BSP_LED_Off(LED_GREEN);
+		break;
+	case HOST_USER_CLASS_ACTIVE:
+		appState = APP_READY;
+		BSP_LED_On(LED_GREEN);
+		break;
+	case HOST_USER_CONNECTION:
+		appState = APP_START;
+		break;
+	default:
+		break;
+	}
+}
+//=================================================================
+void midiApplication(void)
+{
+	switch (appState) {
+	case APP_READY:
+		USBH_MIDI_Receive(&hUSBHost, midiReceiveBuffer, MIDI_BUF_SIZE);
+		appState = APP_RUNNING;
+		break;
+	case APP_RUNNING:
+		if (USBReceiveAvailable) {
+			USBReceiveAvailable = 0;
+			USBH_MIDI_Receive(&hUSBHost, midiReceiveBuffer, MIDI_BUF_SIZE);
+		}
+		break;
+	case APP_DISCONNECT:
+		appState = APP_IDLE;
+		USBH_MIDI_Stop(&hUSBHost);
+		break;
+	default:
+		break;
+	}
+}
+//=================================================================
+
+int tab_midi_log[100];
+
+void processMidiPackets() {
+	static int i=0;
+
+	uint8_t *ptr = midiReceiveBuffer;
+	uint16_t numPackets = USBH_MIDI_GetLastReceivedDataSize(&hUSBHost)/4; //>> 2;
+
+	if (numPackets != 0) {
+		while (numPackets--) {
+						ptr++;
+						uint32_t type = *ptr++;
+						uint32_t subtype = *ptr++;
+						uint32_t vel = *ptr++;
+
+						tab_midi_log[i]=type;
+						i=(i+1)%100;
+					/*	tab_midi_log[i]=subtype;
+						i=(i+1)%100;
+						tab_midi_log[i]=vel;
+						i=(i+1)%100;*/
+
+						type = type & 0xF0; // ignore channel
+						switch(type)
+						{
+						case 0x90 : noteOn = subtype;
+									adsr0.triggOn=1;
+									adsr0.nb_key_pressed++;
+									break;
+						case 0x80 : noteOff = subtype;
+									adsr0.triggOff=1;
+									adsr0.nb_key_pressed--;
+									break;
+						default : break;
+						}
+
+						if (vel == 0)
+						{
+							noteOff = subtype;
+							adsr0.triggOff=1;
+							adsr0.nb_key_pressed--;
+						}
+
+
+				/*		if ((type & 0xF0) == 0x90)
+								{
+									noteOn = subtype;
+									triggOn=1;
+								}
+
+						else if ((type & 0xF0) == 0x80)  // NOTE OFF
+								{
+									noteOff = subtype;
+									triggOff=1;
+								}
+*/
+
+							}
+						}
+}
+//=================================================================
+void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost) {
+	//BSP_LED_Toggle(LED_GREEN);
+	processMidiPackets();
+	USBReceiveAvailable = 1;
+	//USBH_MIDI_Receive(&hUSBHost, midiReceiveBuffer, MIDI_BUF_SIZE);
+}
+//=================================================================
+
+/**
+  * @brief  Configure the MPU attributes as Write Through for SRAM1/2.
+  * @note   The Base Address is 0x20010000 since this memory interface is the AXI.
+  *         The Region Size is 256KB, it is related to SRAM1 and SRAM2  memory size.
+  * @param  None
+  * @retval None
+  */
+static void MPU_Config(void)
+{
+  MPU_Region_InitTypeDef MPU_InitStruct;
+
+  /* Disable the MPU */
+  HAL_MPU_Disable();
+
+  /* Configure the MPU attributes as WT for SRAM */
+  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
+  MPU_InitStruct.BaseAddress = 0x20010000;
+  MPU_InitStruct.Size = MPU_REGION_SIZE_256KB;
+  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
+  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+  MPU_InitStruct.IsCacheable = MPU_ACCESS_CACHEABLE;
+  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
+  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
+  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
+  MPU_InitStruct.SubRegionDisable = 0x00;
+  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
+
+  HAL_MPU_ConfigRegion(&MPU_InitStruct);
+
+  /* Enable the MPU */
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+}
+
+/**
+  * @brief  CPU L1-Cache enable.
+  * @param  None
+  * @retval None
+  */
+static void CPU_CACHE_Enable(void)
+{
+  /* Enable I-Cache */
+  SCB_EnableICache();
+
+  /* Enable D-Cache */
+  SCB_EnableDCache();
+}
+
+static void SystemClock_Config(void)
+{
+  HAL_StatusTypeDef ret = HAL_OK;
+  RCC_ClkInitTypeDef RCC_ClkInitStruct;
+  RCC_OscInitTypeDef RCC_OscInitStruct;
+
+  /* Enable Power Control clock */
+  __HAL_RCC_PWR_CLK_ENABLE();
+
+  /* The voltage scaling allows optimizing the power consumption when the device is
+     clocked below the maximum system frequency, to update the voltage scaling value
+     regarding system frequency refer to product datasheet.  */
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+  /* Enable HSE Oscillator and activate PLL with HSE as source */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 25;
+  RCC_OscInitStruct.PLL.PLLN = 400;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 8;
+  ret = HAL_RCC_OscConfig(&RCC_OscInitStruct);
+  ASSERT(ret != HAL_OK);
+
+  /* activate the OverDrive */
+  ret = HAL_PWREx_ActivateOverDrive();
+  ASSERT(ret != HAL_OK);
+
+  /* Select PLL as system clock source and configure the HCLK, PCLK1 and PCLK2
+     clocks dividers */
+  RCC_ClkInitStruct.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2);
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+
+  ret = HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5);
+  ASSERT(ret != HAL_OK);
+}

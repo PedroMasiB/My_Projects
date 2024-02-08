@@ -1,0 +1,6 @@
+1637935029742	Delete resource 'stm32f746_disco/Middlewares/ST/STM32_USB_Host_Library'
+1637935042803	Delete resource 'stm32f746_disco/Middlewares/ST/STM32_USB_Device_Library'
+1637935180901	Delete resource 'stm32f746_disco/Src'
+1637935379195	Delete 8 resources
+1637937883408	Delete resource 'stm32f746_disco/Middlewares/Third_Party/FreeRTOS'
+1637937886364	Delete resource 'stm32f746_disco/Middlewares/Third_Party'

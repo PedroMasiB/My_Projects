@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog">
+		<item key="wrap" value="true"/>
+		<item key="casesensitive" value="true"/>
+		<item key="wholeword" value="false"/>
+		<item key="incremental" value="false"/>
+		<item key="isRegEx" value="false"/>
+		<item key="selection" value="arm_iir"/>
+		<list key="findhistory">
+			<item value="arm_iir"/>
+			<item value="canReceive"/>
+			<item value="iir_custom"/>
+			<item value="filter_frequency"/>
+			<item value="sine_frequency"/>
+			<item value="double"/>
+			<item value="BSP_LED_On"/>
+			<item value="arm_sin"/>
+			<item value="SAI_Receive_IT"/>
+			<item value="SAI_Receive_IT16Bit"/>
+			<item value="HAL_HCD_SOF_Callback"/>
+			<item value="hHCD"/>
+		</list>
+		<list key="replacehistory">
+			<item value="USBReceiveAvailable"/>
+			<item value="iir"/>
+			<item value="cutoff_freq"/>
+			<item value="signal_freq"/>
+			<item value="float"/>
+		</list>
+	</section>
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog_dialogBounds">
+		<item key="DIALOG_X_ORIGIN" value="879"/>
+		<item key="DIALOG_Y_ORIGIN" value="207"/>
+		<item key="DIALOG_WIDTH" value="334"/>
+		<item key="DIALOG_HEIGHT" value="422"/>
+		<item key="DIALOG_FONT_NAME" value="1|Noto Sans|9.0|0|GTK|1|"/>
+	</section>
+</section>

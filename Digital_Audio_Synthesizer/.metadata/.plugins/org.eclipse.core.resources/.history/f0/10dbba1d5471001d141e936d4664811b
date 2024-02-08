@@ -1,0 +1,56 @@
+/*
+ * adsr.c
+ *
+ *  Created on: Oct 6, 2022
+ *      Author: kerhoas
+ */
+#include "adsr.h"
+#include <stdint.h>
+#pragma GCC optimize ("O0")
+
+int adsr(struct adsr_TypeStruct* adsr_s)
+{
+	 if(adsr_s -> triggOn == 1)
+				  {
+					 adsr_s ->state_adsr = ATTACK;
+					 adsr_s ->count_adsr = 0;
+					 adsr_s ->triggOn = 0;
+					 //adsr_s ->triggOff = 0;
+					 adsr_s ->theta=0.0;
+				  }
+
+ switch(adsr_s ->state_adsr)
+ {
+	 case NOTE_OFF :      adsr_s ->gain=0.0;
+	 	 	 	 	 	  adsr_s ->sig_freq=0;
+						  break;
+
+	 case ATTACK :   	 adsr_s ->gain=adsr_s ->gain+(1.0/ATTACK_DURATION);
+	 	 	 	 	 	 adsr_s ->sig_freq = adsr_s ->note_freq;
+	 	 	 	 	 	 adsr_s ->count_adsr++;
+					  if (adsr_s ->count_adsr > ATTACK_DURATION )
+					  { adsr_s ->state_adsr = DECAY; }
+					  break;
+	 case DECAY : 	  	adsr_s ->count_adsr++;
+	 	 	 	 	 	 adsr_s ->state_adsr = SUSTAIN;
+					  break;
+	 case SUSTAIN :  adsr_s ->gain=1;
+					 if((adsr_s ->triggOff == 1)&&(adsr_s ->nb_key_pressed==0))
+	 	 	 	 	 //if(adsr_s ->triggOff == 1)
+					  {
+						  adsr_s ->state_adsr = RELEASE;
+						  adsr_s ->count_adsr = 0;
+						  adsr_s ->triggOff = 0;
+					  }
+					  break;
+	 case RELEASE :  adsr_s ->gain=adsr_s ->gain-(1.0/RELEASE_DURATION);
+	 	 	 	 	 adsr_s ->count_adsr++;
+					  if (adsr_s ->count_adsr > RELEASE_DURATION )
+					  { adsr_s ->state_adsr = NOTE_OFF; }
+					  break;
+	 default : break;
+
+ }
+return 0;
+
+}

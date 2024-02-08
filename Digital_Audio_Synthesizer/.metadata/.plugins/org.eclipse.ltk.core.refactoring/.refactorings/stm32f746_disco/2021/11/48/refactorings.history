@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;stm32f746_disco/src/stm32f7_fir_intr.c&apos; to &apos;stm32f7_fir_intr.c.save&apos;" description="Rename resource &apos;stm32f7_fir_intr.c&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="src/stm32f7_fir_intr.c" name="stm32f7_fir_intr.c.save" stamp="1637937702420" updateReferences="true"/>
+</session>

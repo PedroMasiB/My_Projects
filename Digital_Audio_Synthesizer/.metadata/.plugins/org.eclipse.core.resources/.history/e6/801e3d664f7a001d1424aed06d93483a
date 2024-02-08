@@ -1,0 +1,136 @@
+#include "IIR_filter.h"
+#pragma GCC optimize ("O0")
+
+
+
+//=====================================================================
+void arm_iir_init_f32( arm_iir_instance_f32 * S,  uint16_t numStages,  float32_t * pCoeffs,  float32_t * pState,  uint32_t blockSize)
+{
+	  S->numStages = numStages;
+	  S->coef = pCoeffs;
+	  //memset(pState, 0, (numStages + (blockSize - 1U)) * sizeof(float32_t)); // !!!!!!!!!!
+	  S->pState = pState;
+}
+//=====================================================================
+void IIR_calc_coeff_f32(arm_iir_instance_f32 *S, uint16_t numStages,float32_t fc1, float32_t fc2, float32_t fe, int filter_type )
+{
+
+	BIQUAD ProtoCoef[FILTER_SECTIONS];
+
+	float    *coef;
+		//float   fs, fc;     /* Sampling frequency, cutoff frequency */
+		float   Q;     /* Resonance > 1.0 < 1000 */
+		unsigned nInd;
+		float   a0, a1, a2, b0, b1, b2;
+		static float   k;           /* overall gain factor */
+
+		// Setup filter s-domain coefficients
+	               // Section 1
+		          ProtoCoef[0].a0 = 1.0;
+		          ProtoCoef[0].a1 = 0;
+		          ProtoCoef[0].a2 = 0;
+		          ProtoCoef[0].b0 = 1.0;
+		          ProtoCoef[0].b1 = 0.765367;
+		          ProtoCoef[0].b2 = 1.0;
+	               // Section 2
+		          ProtoCoef[1].a0 = 1.0;
+		          ProtoCoef[1].a1 = 0;
+		          ProtoCoef[1].a2 = 0;
+		          ProtoCoef[1].b0 = 1.0;
+		          ProtoCoef[1].b1 = 1.847759;
+		          ProtoCoef[1].b2 = 1.0;
+
+		         S->numStages = numStages;         // Number of filter sections
+
+		   // Allocate array of z-domain coefficients for each filter section
+		   // plus filter gain variable
+
+		          //S->coef = (float *) calloc(4 * iir.length + 1, sizeof(float));
+		         //   memset(S->coef, 0, (4*numTaps + 1) * sizeof(float32_t));
+		         // S->coef=tab_coef; // ALLOCATION STATIQUE
+
+
+		         /* if (!iir.coef)
+		          {
+		                  // printf("Unable to allocate coef array, exiting\n");
+		                   exit(1);
+		          }*/
+		          k = 1.0;           // Set overall filter gain
+		          coef = (S->coef) + 1;      // Skip k, or gain
+		          Q = 1.5;                          // Resonance
+
+
+		   // Compute z-domain coefficients for each biquad section
+		   // for new Cutoff Frequency and Resonance
+
+		          for (nInd = 0; nInd < S->numStages; nInd++)
+		          {
+		                   a0 = ProtoCoef[nInd].a0;
+		                   a1 = ProtoCoef[nInd].a1;
+		                   a2 = ProtoCoef[nInd].a2;
+
+		                   b0 = ProtoCoef[nInd].b0;
+		                   b1 = (ProtoCoef[nInd].b1) / Q;      // Divide by resonance or Q
+
+		                   b2 = ProtoCoef[nInd].b2;
+		                   szxform(&a0, &a1, &a2, &b0, &b1, &b2, fc1, fe, &k, coef);
+		                   coef += 4;                       // Point to next filter section
+		          }
+
+		          // Update overall filter gain in coef array
+		          S->coef[0] = k;
+
+		        //  return 0;
+
+
+}
+//=====================================================================
+int arm_iir_f32(arm_iir_instance_f32 *S, float* x, float* y)
+{
+    unsigned int i;
+    float *hist1_ptr,*hist2_ptr,*coef_ptr;
+    float output=0.0;
+    float new_hist,history1,history2;
+
+/* allocate history array if different size than last call */
+
+    if(!S->pState) {
+
+    	//S->pState = tab_history;
+
+       /* iir->history = (float *) calloc(2*iir->length,sizeof(float));
+        if(!iir->history) {
+           // printf("\nUnable to allocate history array in iir_filter\n");
+            exit(1);
+        }*/
+    }
+
+    coef_ptr = S->coef;                /* coefficient pointer */
+
+    hist1_ptr = S->pState;            /* first history */
+    hist2_ptr = hist1_ptr + 1;           /* next history */
+
+        /* 1st number of coefficients array is overall input scale factor,
+         * or filter gain */
+    output = *x * (*coef_ptr++);
+
+    for (i = 0 ; i < S->numStages; i++)
+        {
+        history1 = *hist1_ptr;           /* history values */
+        history2 = *hist2_ptr;
+
+        output = output - history1 * (*coef_ptr++);
+        new_hist = *x - history2 * (*coef_ptr++);    /* poles */
+
+        output = new_hist + history1 * (*coef_ptr++);
+        output = output + history2 * (*coef_ptr++);      /* zeros */
+
+        *hist2_ptr++ = *hist1_ptr;
+        *hist1_ptr++ = new_hist;
+        hist1_ptr++;
+        hist2_ptr++;
+    }
+    *y = output;
+    return 0;
+}
+//=====================================================================
